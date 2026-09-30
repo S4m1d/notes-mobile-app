@@ -201,6 +201,10 @@ export component Editor inherits Rectangle {
         }
 
         flick := Flickable {
+            // An explicit width stops Slint from copying the column's max-width
+            // onto the Flickable: a blank line caps it at the longest word,
+            // which squeezed every line into a narrow column.
+            width: root.width;
             vertical-stretch: 1;
             content-width: self.width;
             content-height: max(self.height, column.preferred-height + 260px);
