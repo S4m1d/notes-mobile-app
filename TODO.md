@@ -19,6 +19,7 @@ Android 17) over adb on 2026-09-30.
 - [~] Vault list: delete with confirmation (same dialog as entries; not tapped through)
 - [x] Directory browser: open, back, create directory, create note, delete with confirmation
 - [x] System back gesture navigates up
+- [x] Search note and directory names in the whole vault (verified on the phone)
 
 ## 3. Editor
 
@@ -54,7 +55,7 @@ Android 17) over adb on 2026-09-30.
 - [ ] Bluetooth transport for sync
 - [ ] Rename and move notes and directories
 - [ ] Tap position places the caret inside the line
-- [ ] Search
+- [ ] Search inside note contents
 - [ ] Desktop address discovery (mDNS) instead of typing the IP
 - [ ] Declare Android 17's local-network permission once the target SDK moves to 37
       (today it is granted implicitly because the app targets SDK 36)

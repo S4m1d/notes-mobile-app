@@ -93,6 +93,38 @@ pub fn list(root: &Path, dir: &str) -> Result<Vec<Item>> {
     Ok(items)
 }
 
+/// A search result: the path of a note or directory relative to the vault root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hit {
+    pub rel: String,
+    pub is_dir: bool,
+}
+
+/// Finds notes and directories anywhere in the vault whose name contains
+/// `query`, ignoring case. Results are sorted by path, at most `limit` of them.
+pub fn search(root: &Path, query: &str, limit: usize) -> Result<Vec<Hit>> {
+    let query = query.trim().to_lowercase();
+    let mut hits = Vec::new();
+    if query.is_empty() {
+        return Ok(hits);
+    }
+    let mut pending = vec![String::new()];
+    while let Some(dir) = pending.pop() {
+        for item in list(root, &dir)? {
+            let rel = join_rel(&dir, &item.name);
+            if item.name.to_lowercase().contains(&query) {
+                hits.push(Hit { rel: rel.clone(), is_dir: item.is_dir });
+            }
+            if item.is_dir {
+                pending.push(rel);
+            }
+        }
+    }
+    hits.sort_by_key(|h| h.rel.to_lowercase());
+    hits.truncate(limit);
+    Ok(hits)
+}
+
 pub fn create_dir(root: &Path, parent: &str, name: &str) -> Result<String> {
     let name = name.trim();
     validate_name(name)?;
@@ -193,5 +225,29 @@ mod tests {
 
         delete(root, "work").unwrap();
         assert_eq!(list(root, "").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn search_matches_names_in_the_whole_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        create_dir(root, "", "Projects").unwrap();
+        create_dir(root, "Projects", "rust").unwrap();
+        create_note(root, "Projects/rust", "Trust notes").unwrap();
+        create_note(root, "", "shopping").unwrap();
+        fs::create_dir(root.join(".rusty")).unwrap();
+        fs::write(root.join("rust.txt"), b"x").unwrap();
+
+        let hits = search(root, " RUST ", 10).unwrap();
+        assert_eq!(
+            hits,
+            vec![
+                Hit { rel: "Projects/rust".into(), is_dir: true },
+                Hit { rel: "Projects/rust/Trust notes.md".into(), is_dir: false },
+            ]
+        );
+        assert_eq!(search(root, "rust", 1).unwrap().len(), 1);
+        assert!(search(root, "", 10).unwrap().is_empty());
+        assert!(search(root, "nothing", 10).unwrap().is_empty());
     }
 }

@@ -77,6 +77,7 @@ export component Field inherits Rectangle {
     in-out property <string> text <=> input.text;
     in property <string> placeholder;
     callback accepted;
+    callback edited(text: string);
 
     public function grab-focus() {
         input.focus();
@@ -112,6 +113,9 @@ export component Field inherits Rectangle {
         selection-foreground-color: Theme.bg;
         accepted => {
             root.accepted();
+        }
+        edited => {
+            root.edited(self.text);
         }
     }
 }
@@ -170,11 +174,14 @@ export component Header inherits Rectangle {
     }
 }
 
-// A tappable list row with an icon, a label and a delete button.
+// A tappable list row with an icon, a label, an optional second line and a
+// delete button.
 export component Row inherits Rectangle {
     in property <image> icon;
     in property <color> tint: Theme.scarlet;
     in property <string> label;
+    in property <string> detail;
+    in property <bool> deletable: true;
     callback clicked;
     callback delete;
 
@@ -202,16 +209,25 @@ export component Row inherits Rectangle {
             }
         }
 
-        Text {
-            text: root.label;
-            color: Theme.text;
-            font-size: 16px;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
             horizontal-stretch: 1;
-            overflow: elide;
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: 16px;
+                overflow: elide;
+            }
+
+            if root.detail != "": Text {
+                text: root.detail;
+                color: Theme.muted;
+                font-size: 12px;
+                overflow: elide;
+            }
         }
 
-        VerticalLayout {
+        if root.deletable: VerticalLayout {
             alignment: center;
             IconButton {
                 icon: @image-url("icons/trash.svg");

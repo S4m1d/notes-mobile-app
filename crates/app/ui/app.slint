@@ -10,6 +10,8 @@ export enum DialogKind { none, new-vault, new-dir, new-note, delete-vault, delet
 export struct Entry {
     name: string,
     is-dir: bool,
+    // Where a search result lives, e.g. "/work/2026".
+    detail: string,
 }
 
 // Everything the UI asks the Rust side to do.
@@ -18,6 +20,9 @@ export global Logic {
     callback back() -> bool;
     callback open-vault(name: string);
     callback open-entry(index: int);
+    callback open-search();
+    callback search(query: string);
+    callback open-result(index: int);
     callback open-sync();
     callback dialog-confirmed(kind: DialogKind, text: string);
     callback dialog-cancelled(kind: DialogKind);
@@ -155,6 +160,10 @@ export component AppWindow inherits Window {
     // Directory shown by the browser, relative to the vault ("" is its root).
     in property <string> dir-path;
     in property <[Entry]> entries;
+    // The browser shows the search bar and results instead of the directory.
+    in property <bool> searching;
+    in-out property <string> search-query;
+    in property <[Entry]> search-results;
 
     in property <string> note-title;
     in property <[Line]> lines;
@@ -250,12 +259,68 @@ export component AppWindow inherits Window {
                 }
             }
 
-            if root.screen == Screen.browser: VerticalLayout {
+            if root.screen == Screen.browser && root.searching: VerticalLayout {
+                Header {
+                    back => {
+                        Logic.back();
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 100;
+                        padding-right: 8px;
+                        Field {
+                            text <=> root.search-query;
+                            placeholder: "Search " + root.vault-name;
+                            init => {
+                                self.grab-focus();
+                            }
+                            edited(text) => {
+                                Logic.search(text);
+                            }
+                        }
+                    }
+                }
+
+                if root.search-results.length == 0: EmptyHint {
+                    text: root.search-query == "" ? "Type to search names of notes and directories in the whole vault." : "Nothing found.";
+                }
+
+                if root.search-results.length > 0: Flickable {
+                    content-width: self.width;
+                    content-height: max(self.height, result-list.preferred-height);
+                    result-list := VerticalLayout {
+                        alignment: start;
+                        for entry[index] in root.search-results: Row {
+                            icon: entry.is-dir ? @image-url("icons/folder.svg") : @image-url("icons/note.svg");
+                            tint: entry.is-dir ? Theme.scarlet : Theme.cyan;
+                            label: entry.name;
+                            detail: entry.detail;
+                            deletable: false;
+                            clicked => {
+                                Logic.open-result(index);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.screen == Screen.browser && !root.searching: VerticalLayout {
                 Header {
                     title: root.vault-name;
                     subtitle: root.dir-path == "" ? "" : "/" + root.dir-path;
                     back => {
                         Logic.back();
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: @image-url("icons/search.svg");
+                            clicked => {
+                                Logic.open-search();
+                            }
+                        }
                     }
 
                     VerticalLayout {

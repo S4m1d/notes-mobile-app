@@ -44,6 +44,8 @@ pub struct App {
     /// Directory shown by the browser, relative to the vault root.
     dir: RefCell<String>,
     entries: RefCell<Vec<vault::Item>>,
+    /// Results of the browser search, in the order shown.
+    hits: RefCell<Vec<vault::Hit>>,
     editor: editor::Editor,
     sync: sync_ui::SyncState,
     /// The screen the sync screen was opened from.
@@ -94,12 +96,48 @@ impl App {
     fn show_browser(&self) {
         let dir = self.dir.borrow().clone();
         let items = self.report(vault::list(&self.vault_root(), &dir)).unwrap_or_default();
-        let rows: Vec<Entry> = items.iter().map(|i| Entry { name: i.name.as_str().into(), is_dir: i.is_dir }).collect();
+        let rows: Vec<Entry> = items.iter().map(|i| Entry { name: i.name.as_str().into(), is_dir: i.is_dir, detail: "".into() }).collect();
         *self.entries.borrow_mut() = items;
         self.ui.set_entries(ModelRc::new(VecModel::from(rows)));
         self.ui.set_vault_name(self.vault.borrow().as_str().into());
         self.ui.set_dir_path(dir.into());
+        self.ui.set_searching(false);
         self.ui.set_screen(Screen::Browser);
+    }
+
+    fn open_search(&self) {
+        self.hits.borrow_mut().clear();
+        self.ui.set_search_query("".into());
+        self.ui.set_search_results(ModelRc::default());
+        self.ui.set_searching(true);
+    }
+
+    fn search(&self, query: &str) {
+        let hits = self.report(vault::search(&self.vault_root(), query, 200)).unwrap_or_default();
+        let rows: Vec<Entry> = hits
+            .iter()
+            .map(|hit| {
+                let (dir, name) = hit.rel.rsplit_once('/').unwrap_or(("", &hit.rel));
+                Entry { name: name.into(), is_dir: hit.is_dir, detail: format!("/{dir}").into() }
+            })
+            .collect();
+        *self.hits.borrow_mut() = hits;
+        self.ui.set_search_results(ModelRc::new(VecModel::from(rows)));
+    }
+
+    /// Opens a search result: a directory in the browser, a note in the
+    /// editor, with the browser moved to the note's directory for going back.
+    fn open_result(&self, index: usize) {
+        let Some(hit) = self.hits.borrow().get(index).cloned() else { return };
+        if hit.is_dir {
+            *self.dir.borrow_mut() = hit.rel;
+            self.show_browser();
+        } else {
+            *self.dir.borrow_mut() = vault::parent_rel(&hit.rel).to_string();
+            self.show_browser();
+            self.open_note(&hit.rel);
+        }
+        self.ui.invoke_grab_focus();
     }
 
     fn open_vault(&self, name: &str) {
@@ -138,7 +176,9 @@ impl App {
             Screen::Vaults => return false,
             Screen::Browser => {
                 let dir = self.dir.borrow().clone();
-                if dir.is_empty() {
+                if self.ui.get_searching() {
+                    self.show_browser();
+                } else if dir.is_empty() {
                     self.show_vaults();
                 } else {
                     *self.dir.borrow_mut() = vault::parent_rel(&dir).to_string();
@@ -253,6 +293,9 @@ fn connect_ui(app: &Rc<App>) {
     on!(on_back, |app| app.back());
     on!(on_open_vault, |app, name| app.open_vault(&name));
     on!(on_open_entry, |app, index| app.open_entry(index as usize));
+    on!(on_open_search, |app| app.open_search());
+    on!(on_search, |app, query| app.search(&query));
+    on!(on_open_result, |app, index| app.open_result(index as usize));
     on!(on_open_sync, |app| app.open_sync());
     on!(on_dialog_confirmed, |app, kind, text| app.dialog_confirmed(kind, &text));
     on!(on_dialog_cancelled, |app, kind| app.dialog_cancelled(kind));
@@ -290,6 +333,7 @@ pub fn run(data_dir: PathBuf) -> Result<()> {
         vault: RefCell::default(),
         dir: RefCell::default(),
         entries: RefCell::default(),
+        hits: RefCell::default(),
         editor: editor::Editor::default(),
         sync: sync_ui::SyncState::default(),
         sync_origin: Cell::new(Screen::Vaults),
