@@ -1,0 +1,20 @@
+[package]
+name = "scarlet-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+snow = { version = "0.10", default-features = false, features = [
+    "default-resolver",
+    "use-chacha20poly1305",
+    "use-blake2",
+    "use-curve25519",
+    "use-getrandom",
+] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

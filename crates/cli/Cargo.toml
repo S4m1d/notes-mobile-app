@@ -1,0 +1,11 @@
+[package]
+name = "scarlet-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "scarlet"
+path = "src/main.rs"
+
+[dependencies]
+scarlet-core = { workspace = true }

@@ -1,0 +1,505 @@
+import { Theme, IconButton, TextButton, Field, Header, Row, EmptyHint } from "widgets.slint";
+import { Editor, Line, LineKind } from "editor.slint";
+
+export { Line, LineKind }
+
+export enum Screen { vaults, browser, editor, sync }
+
+export enum DialogKind { none, new-vault, new-dir, new-note, delete-vault, delete-entry, pairing, device-name }
+
+export struct Entry {
+    name: string,
+    is-dir: bool,
+}
+
+// Everything the UI asks the Rust side to do.
+export global Logic {
+    // Returns false when there is nothing to go back to (the app may close).
+    callback back() -> bool;
+    callback open-vault(name: string);
+    callback open-entry(index: int);
+    callback open-sync();
+    callback dialog-confirmed(kind: DialogKind, text: string);
+    callback dialog-cancelled(kind: DialogKind);
+
+    callback line-activated(index: int);
+    callback line-edited(index: int, text: string);
+    callback line-toggled(index: int);
+    callback line-merged-up(index: int);
+    callback editor-tap-end();
+    callback editor-add-task();
+    callback editor-done();
+
+    callback sync-connect(address: string);
+    callback sync-listen();
+    callback sync-stop();
+}
+
+component Dialog inherits Rectangle {
+    in property <DialogKind> kind;
+    // The vault, note, directory or device the dialog is about.
+    in property <string> subject;
+    in property <string> detail;
+    in property <string> initial-text;
+    property <string> input-text: root.initial-text;
+
+    property <bool> has-input: root.kind == DialogKind.new-vault || root.kind == DialogKind.new-dir || root.kind == DialogKind.new-note || root.kind == DialogKind.device-name;
+    property <bool> danger: root.kind == DialogKind.delete-vault || root.kind == DialogKind.delete-entry;
+    property <string> title: root.kind == DialogKind.new-vault ? "New vault" : root.kind == DialogKind.new-dir ? "New directory" : root.kind == DialogKind.new-note ? "New note" : root.kind == DialogKind.pairing ? "Pair with device?" : root.kind == DialogKind.device-name ? "Device name" : "Delete?";
+    property <string> message: root.kind == DialogKind.delete-vault ? "The vault \"" + root.subject + "\" and all notes in it will be deleted from this device." : root.kind == DialogKind.delete-entry ? "\"" + root.subject + "\" will be deleted. Directories are deleted with everything inside." : root.kind == DialogKind.pairing ? "\"" + root.subject + "\" wants to pair for syncing. Confirm only if it shows the same code:" : "";
+    property <string> confirm-label: root.danger ? "Delete" : root.kind == DialogKind.pairing ? "Codes match" : root.kind == DialogKind.device-name ? "Save" : "Create";
+
+    background: #000000c8;
+
+    TouchArea {
+        clicked => {
+            Logic.dialog-cancelled(root.kind);
+        }
+    }
+
+    VerticalLayout {
+        alignment: start;
+        padding-top: max(80px, root.height * 0.18);
+        padding-left: 28px;
+        padding-right: 28px;
+
+        Rectangle {
+            background: Theme.surface;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            TouchArea { }
+
+            VerticalLayout {
+                padding: 22px;
+                spacing: 16px;
+
+                Text {
+                    text: root.title;
+                    color: Theme.scarlet;
+                    font-size: 19px;
+                    font-weight: 700;
+                }
+
+                if root.message != "": Text {
+                    text: root.message;
+                    color: Theme.text;
+                    font-size: 15px;
+                    wrap: word-wrap;
+                }
+
+                if root.detail != "": Text {
+                    text: root.detail;
+                    color: Theme.mint;
+                    font-family: "Droid Sans Mono";
+                    font-size: 26px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+
+                if root.has-input: Field {
+                    text <=> root.input-text;
+                    placeholder: "Name";
+                    init => {
+                        self.grab-focus();
+                    }
+                    accepted => {
+                        Logic.dialog-confirmed(root.kind, root.input-text);
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+
+                    TextButton {
+                        text: "Cancel";
+                        clicked => {
+                            Logic.dialog-cancelled(root.kind);
+                        }
+                    }
+
+                    TextButton {
+                        text: root.confirm-label;
+                        primary: true;
+                        accent: root.kind == DialogKind.pairing ? Theme.mint : Theme.scarlet;
+                        clicked => {
+                            Logic.dialog-confirmed(root.kind, root.input-text);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component SectionTitle inherits Text {
+    color: Theme.scarlet;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+component Hint inherits Text {
+    color: Theme.muted;
+    font-size: 13px;
+    wrap: word-wrap;
+}
+
+export component AppWindow inherits Window {
+    in property <Screen> screen: Screen.vaults;
+
+    in property <[string]> vaults;
+
+    in property <string> vault-name;
+    // Directory shown by the browser, relative to the vault ("" is its root).
+    in property <string> dir-path;
+    in property <[Entry]> entries;
+
+    in property <string> note-title;
+    in property <[Line]> lines;
+    in property <int> active-line: -1;
+    in property <int> cursor-offset;
+
+    in-out property <DialogKind> dialog: DialogKind.none;
+    in-out property <string> dialog-subject;
+    in property <string> dialog-detail;
+    in-out property <string> dialog-initial-text;
+
+    in property <string> device-name;
+    in property <string> device-key;
+    in property <string> device-address;
+    in-out property <string> sync-address;
+    in property <[string]> sync-log;
+    in property <bool> sync-busy;
+    in property <bool> sync-listening;
+
+    // A transient error line at the bottom of the screen; tap to dismiss.
+    in-out property <string> message;
+
+    public function grab-focus() {
+        scope.focus();
+    }
+
+    title: "Scarlet Notes";
+    background: Theme.bg;
+    default-font-size: 16px;
+    preferred-width: 412px;
+    preferred-height: 892px;
+    forward-focus: scope;
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Back || event.text == Key.Escape) {
+                return Logic.back() ? accept : reject;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding-top: root.safe-area-insets.top;
+            padding-bottom: max(root.safe-area-insets.bottom, root.virtual-keyboard-size.height);
+
+            if root.screen == Screen.vaults: VerticalLayout {
+                Header {
+                    title: "Scarlet Notes";
+                    show-back: false;
+
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: @image-url("icons/sync.svg");
+                            clicked => {
+                                Logic.open-sync();
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: @image-url("icons/plus.svg");
+                            clicked => {
+                                root.dialog = DialogKind.new-vault;
+                            }
+                        }
+                    }
+                }
+
+                if root.vaults.length == 0: EmptyHint {
+                    text: "No vaults yet.\nTap + to create one, or sync one from your desktop.";
+                }
+
+                if root.vaults.length > 0: Flickable {
+                    content-width: self.width;
+                    content-height: max(self.height, vault-list.preferred-height);
+                    vault-list := VerticalLayout {
+                        alignment: start;
+                        for name in root.vaults: Row {
+                            icon: @image-url("icons/vault.svg");
+                            label: name;
+                            clicked => {
+                                Logic.open-vault(name);
+                            }
+                            delete => {
+                                root.dialog-subject = name;
+                                root.dialog = DialogKind.delete-vault;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.screen == Screen.browser: VerticalLayout {
+                Header {
+                    title: root.vault-name;
+                    subtitle: root.dir-path == "" ? "" : "/" + root.dir-path;
+                    back => {
+                        Logic.back();
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: @image-url("icons/sync.svg");
+                            clicked => {
+                                Logic.open-sync();
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: @image-url("icons/folder-plus.svg");
+                            clicked => {
+                                root.dialog = DialogKind.new-dir;
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: @image-url("icons/note-plus.svg");
+                            clicked => {
+                                root.dialog = DialogKind.new-note;
+                            }
+                        }
+                    }
+                }
+
+                if root.entries.length == 0: EmptyHint {
+                    text: "Nothing here yet.\nAdd a note or a directory with the buttons above.";
+                }
+
+                if root.entries.length > 0: Flickable {
+                    content-width: self.width;
+                    content-height: max(self.height, entry-list.preferred-height);
+                    entry-list := VerticalLayout {
+                        alignment: start;
+                        for entry[index] in root.entries: Row {
+                            icon: entry.is-dir ? @image-url("icons/folder.svg") : @image-url("icons/note.svg");
+                            tint: entry.is-dir ? Theme.scarlet : Theme.cyan;
+                            label: entry.name;
+                            clicked => {
+                                Logic.open-entry(index);
+                            }
+                            delete => {
+                                root.dialog-subject = entry.name;
+                                root.dialog = DialogKind.delete-entry;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.screen == Screen.editor: Editor {
+                title: root.note-title;
+                lines: root.lines;
+                active-line: root.active-line;
+                cursor-offset: root.cursor-offset;
+                back => {
+                    Logic.back();
+                }
+                activate(index) => {
+                    Logic.line-activated(index);
+                }
+                edited(index, text) => {
+                    Logic.line-edited(index, text);
+                }
+                toggle-task(index) => {
+                    Logic.line-toggled(index);
+                }
+                merge-up(index) => {
+                    Logic.line-merged-up(index);
+                }
+                tap-end => {
+                    Logic.editor-tap-end();
+                }
+                add-task => {
+                    Logic.editor-add-task();
+                }
+                done => {
+                    Logic.editor-done();
+                }
+            }
+
+            if root.screen == Screen.sync: VerticalLayout {
+                Header {
+                    title: "Sync";
+                    subtitle: root.vault-name == "" ? "all vaults · receive only" : "vault: " + root.vault-name;
+                    back => {
+                        Logic.back();
+                    }
+                }
+
+                VerticalLayout {
+                    padding: 18px;
+                    spacing: 12px;
+
+                    SectionTitle {
+                        text: "THIS DEVICE";
+                    }
+
+                    Rectangle {
+                        background: Theme.surface;
+                        border-radius: 12px;
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 6px;
+                            Text {
+                                text: root.device-name;
+                                color: Theme.text;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                text: "key  " + root.device-key;
+                                color: Theme.muted;
+                                font-family: "Droid Sans Mono";
+                                font-size: 13px;
+                            }
+
+                            Text {
+                                text: "addr " + root.device-address;
+                                color: Theme.mint;
+                                font-family: "Droid Sans Mono";
+                                font-size: 13px;
+                            }
+                        }
+
+                        TouchArea {
+                            clicked => {
+                                root.dialog-initial-text = root.device-name;
+                                root.dialog = DialogKind.device-name;
+                            }
+                        }
+                    }
+
+                    if root.vault-name != "": SectionTitle {
+                        text: "CONNECT TO DESKTOP";
+                    }
+
+                    if root.vault-name != "": Hint {
+                        text: "Run \"scarlet serve\" on the desktop, then enter its address.";
+                    }
+
+                    if root.vault-name != "": HorizontalLayout {
+                        spacing: 10px;
+                        Field {
+                            text <=> root.sync-address;
+                            placeholder: "192.168.1.10";
+                            horizontal-stretch: 1;
+                            accepted => {
+                                Logic.sync-connect(root.sync-address);
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            TextButton {
+                                text: "Sync";
+                                primary: true;
+                                enabled: !root.sync-busy && !root.sync-listening;
+                                clicked => {
+                                    Logic.sync-connect(root.sync-address);
+                                }
+                            }
+                        }
+                    }
+
+                    SectionTitle {
+                        text: "WAIT FOR DESKTOP";
+                    }
+
+                    Hint {
+                        text: "Start listening, then run \"scarlet sync VAULT " + root.device-address + "\" on the desktop.";
+                    }
+
+                    HorizontalLayout {
+                        alignment: start;
+                        TextButton {
+                            text: root.sync-listening ? "Stop listening" : "Listen";
+                            primary: !root.sync-listening;
+                            accent: Theme.mint;
+                            enabled: !root.sync-busy;
+                            clicked => {
+                                if (root.sync-listening) {
+                                    Logic.sync-stop();
+                                } else {
+                                    Logic.sync-listen();
+                                }
+                            }
+                        }
+                    }
+
+                    log := Flickable {
+                        vertical-stretch: 1;
+                        content-width: self.width;
+                        content-height: max(self.height, log-lines.preferred-height);
+                        content-y: min(0px, self.height - self.content-height);
+                        log-lines := VerticalLayout {
+                            alignment: start;
+                            spacing: 3px;
+                            for entry in root.sync-log: Text {
+                                text: entry;
+                                color: Theme.text;
+                                font-family: "Droid Sans Mono";
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.message != "": Rectangle {
+                height: message-text.preferred-height + 24px;
+                background: Theme.red;
+                message-text := Text {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    text: root.message;
+                    color: white;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.message = "";
+                    }
+                }
+            }
+        }
+
+        if root.dialog != DialogKind.none: Dialog {
+            kind: root.dialog;
+            subject: root.dialog-subject;
+            detail: root.dialog-detail;
+            initial-text: root.dialog-initial-text;
+        }
+    }
+}

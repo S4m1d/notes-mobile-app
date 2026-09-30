@@ -1,0 +1,286 @@
+// The note editor. Every line is shown as rendered markdown, except the
+// active line (the one holding the caret), which is a plain text input.
+
+import { Theme, IconButton, Header } from "widgets.slint";
+
+export enum LineKind { blank, paragraph, heading, bullet, ordered, task-open, task-done, quote, fence, code, rule }
+
+export struct Line {
+    // The markdown source of the line.
+    raw: string,
+    kind: LineKind,
+    // Heading level (1-6).
+    level: int,
+    // List nesting level.
+    indent: int,
+    // Bullet or number shown in front of list items.
+    marker: string,
+    // The line without its block marker: plain for headings and code…
+    plain: string,
+    // …and with inline markdown rendered for everything else.
+    text: styled-text,
+}
+
+component NoteLine inherits Rectangle {
+    in property <Line> line;
+    in property <bool> active;
+    in property <int> cursor-offset;
+    callback activate();
+    callback edited(text: string);
+    callback toggle-task();
+    callback merge-up();
+    callback cursor-moved(y: length);
+
+    property <bool> heading: line.kind == LineKind.heading;
+    property <bool> code: line.kind == LineKind.code || line.kind == LineKind.fence;
+    property <bool> task: line.kind == LineKind.task-open || line.kind == LineKind.task-done;
+    property <bool> done: line.kind == LineKind.task-done;
+    property <bool> list: line.kind == LineKind.bullet || line.kind == LineKind.ordered;
+    property <bool> rule: line.kind == LineKind.rule;
+    property <bool> blank: line.kind == LineKind.blank;
+    property <length> heading-size: line.level == 1 ? 26px : line.level == 2 ? 22px : line.level == 3 ? 19px : 17px;
+
+    background: root.active ? Theme.surface : (root.code ? #14161d : transparent);
+
+    layout := HorizontalLayout {
+        padding-left: 18px + (root.active || root.code ? 0px : root.line.indent * 18px);
+        padding-right: 18px;
+        padding-top: !root.active && root.heading ? 12px : 4px;
+        padding-bottom: 4px;
+        spacing: 10px;
+        min-height: !root.active && root.blank ? 16px : 30px;
+
+        if !root.active && root.line.kind == LineKind.quote: Rectangle {
+            width: 3px;
+            border-radius: 1.5px;
+            background: Theme.scarlet;
+        }
+
+        if !root.active && root.list: Text {
+            text: root.line.marker;
+            color: Theme.scarlet;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        if !root.active && root.task: VerticalLayout {
+            alignment: start;
+            padding-top: 1px;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 5px;
+                border-width: 1.5px;
+                border-color: root.done ? Theme.green : Theme.scarlet;
+                background: root.done ? Theme.green : transparent;
+                if root.done: Image {
+                    source: @image-url("icons/check.svg");
+                    colorize: Theme.bg;
+                    width: 16px;
+                    height: 16px;
+                }
+            }
+        }
+
+        if !root.active && root.heading: Text {
+            text: root.line.plain;
+            color: Theme.scarlet;
+            font-size: root.heading-size;
+            font-weight: 700;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        if !root.active && root.code: Text {
+            text: root.line.plain;
+            color: root.line.kind == LineKind.fence ? Theme.muted : Theme.mint;
+            font-family: "Droid Sans Mono";
+            font-size: 14px;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        if !root.active && root.rule: VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Rectangle {
+                height: 1px;
+                background: Theme.muted;
+            }
+        }
+
+        if !root.active && !root.heading && !root.code && !root.rule && !root.blank: StyledText {
+            text: root.line.text;
+            default-color: root.done ? Theme.muted : Theme.text;
+            default-font-size: 16px;
+            link-color: Theme.cyan;
+            horizontal-stretch: 1;
+        }
+
+        if root.active: TextInput {
+            text: root.line.raw;
+            color: white;
+            font-size: 16px;
+            single-line: false;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            selection-background-color: Theme.scarlet;
+            selection-foreground-color: Theme.bg;
+            init => {
+                self.focus();
+                self.set-selection-offsets(root.cursor-offset, root.cursor-offset);
+            }
+            edited => {
+                root.edited(self.text);
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Backspace && self.cursor-position-byte-offset == 0 && self.anchor-position-byte-offset == 0) {
+                    root.merge-up();
+                    return accept;
+                }
+                reject
+            }
+            cursor-position-changed(position) => {
+                root.cursor-moved(position.y);
+            }
+        }
+    }
+
+    // The caret marker of the active line.
+    if root.active: Rectangle {
+        x: 0px;
+        width: 3px;
+        background: Theme.mint;
+    }
+
+    if !root.active: TouchArea {
+        clicked => {
+            root.activate();
+        }
+    }
+
+    // A generous tap target over the checkbox.
+    if !root.active && root.task: TouchArea {
+        x: 0px;
+        width: layout.padding-left + 34px;
+        clicked => {
+            root.toggle-task();
+        }
+    }
+}
+
+export component Editor inherits Rectangle {
+    in property <string> title;
+    in property <[Line]> lines;
+    in property <int> active-line: -1;
+    in property <int> cursor-offset;
+    callback back();
+    callback activate(index: int);
+    callback edited(index: int, text: string);
+    callback toggle-task(index: int);
+    callback merge-up(index: int);
+    callback tap-end();
+    callback add-task();
+    callback done();
+
+    // Scrolls just enough to keep the caret in view.
+    function reveal(y: length) {
+        if (y - 12px < -flick.content-y) {
+            flick.content-y = min(0px, 12px - y);
+        } else if (y + 64px > flick.height - flick.content-y) {
+            flick.content-y = flick.height - y - 64px;
+        }
+    }
+
+    VerticalLayout {
+        Header {
+            title: root.title;
+            back => {
+                root.back();
+            }
+        }
+
+        flick := Flickable {
+            vertical-stretch: 1;
+            content-width: self.width;
+            content-height: max(self.height, column.preferred-height + 260px);
+
+            // Tapping below the last line continues the note.
+            TouchArea {
+                clicked => {
+                    root.tap-end();
+                }
+            }
+
+            column := VerticalLayout {
+                x: 0px;
+                y: 8px;
+                width: flick.width;
+                height: self.preferred-height;
+
+                for line[index] in root.lines: NoteLine {
+                    line: line;
+                    active: index == root.active-line;
+                    cursor-offset: root.cursor-offset;
+                    activate => {
+                        root.activate(index);
+                    }
+                    edited(text) => {
+                        root.edited(index, text);
+                    }
+                    toggle-task => {
+                        root.toggle-task(index);
+                    }
+                    merge-up => {
+                        root.merge-up(index);
+                    }
+                    cursor-moved(y) => {
+                        root.reveal(self.y + y);
+                    }
+                }
+            }
+        }
+
+        // Editing toolbar; sits right above the on-screen keyboard.
+        Rectangle {
+            height: 50px;
+            background: Theme.surface;
+
+            Rectangle {
+                y: 0px;
+                height: 1px;
+                background: Theme.border;
+            }
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: @image-url("icons/task-add.svg");
+                        clicked => {
+                            root.add-task();
+                        }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                if root.active-line >= 0: VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: @image-url("icons/check.svg");
+                        tint: Theme.mint;
+                        clicked => {
+                            root.done();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

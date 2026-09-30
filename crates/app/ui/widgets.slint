@@ -1,0 +1,241 @@
+// Theme and the few shared widgets. Colours follow the Ghostty theme
+// "Cyberpunk Scarlet Protocol".
+
+export global Theme {
+    out property <color> bg: #101116;
+    out property <color> surface: #181a22;
+    out property <color> surface-hi: #242733;
+    out property <color> border: #2b2e3b;
+    out property <color> scarlet: #e41951;
+    out property <color> red: #ff0051;
+    out property <color> green: #01dc84;
+    out property <color> mint: #76ff9f;
+    out property <color> yellow: #faf945;
+    out property <color> cyan: #00c5c7;
+    out property <color> text: #c7c7c7;
+    out property <color> muted: #686868;
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <color> tint: Theme.scarlet;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: touch.pressed ? Theme.surface-hi : transparent;
+
+    Image {
+        source: root.icon;
+        colorize: root.enabled ? root.tint : Theme.muted;
+        width: 22px;
+        height: 22px;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    in property <color> accent: Theme.scarlet;
+    callback clicked;
+
+    height: 42px;
+    min-width: label.preferred-width + 36px;
+    border-radius: 10px;
+    border-width: root.primary ? 0px : 1px;
+    border-color: Theme.border;
+    background: root.primary ? (touch.pressed ? root.accent.darker(0.3) : root.accent) : (touch.pressed ? Theme.surface-hi : transparent);
+    opacity: root.enabled ? 1 : 0.4;
+
+    label := Text {
+        text: root.text;
+        color: root.primary ? Theme.bg : Theme.text;
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Single-line text field.
+export component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    callback accepted;
+
+    public function grab-focus() {
+        input.focus();
+    }
+
+    height: 46px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.scarlet : Theme.border;
+    background: Theme.bg;
+
+    Text {
+        x: 14px;
+        width: parent.width - 28px;
+        visible: input.text == "" && input.preedit-text == "";
+        text: root.placeholder;
+        color: Theme.muted;
+        font-size: 16px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    input := TextInput {
+        x: 14px;
+        y: 0px;
+        width: parent.width - 28px;
+        height: parent.height;
+        vertical-alignment: center;
+        single-line: true;
+        color: Theme.text;
+        font-size: 16px;
+        selection-background-color: Theme.scarlet;
+        selection-foreground-color: Theme.bg;
+        accepted => {
+            root.accepted();
+        }
+    }
+}
+
+// Top bar: optional back arrow, title with optional subtitle, then actions.
+export component Header inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> show-back: true;
+    callback back;
+
+    height: 56px;
+
+    HorizontalLayout {
+        padding-left: root.show-back ? 4px : 18px;
+        padding-right: 6px;
+        spacing: 2px;
+
+        if root.show-back: VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: @image-url("icons/arrow-left.svg");
+                clicked => {
+                    root.back();
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            padding-left: 4px;
+            Text {
+                text: root.title;
+                color: Theme.scarlet;
+                font-size: 19px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: Theme.muted;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+
+        @children
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+// A tappable list row with an icon, a label and a delete button.
+export component Row inherits Rectangle {
+    in property <image> icon;
+    in property <color> tint: Theme.scarlet;
+    in property <string> label;
+    callback clicked;
+    callback delete;
+
+    height: 58px;
+    background: touch.pressed ? Theme.surface : transparent;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 6px;
+        spacing: 14px;
+
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                colorize: root.tint;
+                width: 22px;
+                height: 22px;
+            }
+        }
+
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 16px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: @image-url("icons/trash.svg");
+                tint: Theme.muted;
+                clicked => {
+                    root.delete();
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: 18px;
+        y: parent.height - 1px;
+        width: parent.width - 18px;
+        height: 1px;
+        background: Theme.surface;
+    }
+}
+
+export component EmptyHint inherits Text {
+    color: Theme.muted;
+    font-size: 15px;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+    wrap: word-wrap;
+}

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.scarletnotes.app"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+
+    <!-- Only used for the on-demand vault sync with a paired device on the local network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="Scarlet Notes"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:extractNativeLibs="true">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale">
+            <meta-data android:name="android.app.lib_name" android:value="scarlet_notes" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

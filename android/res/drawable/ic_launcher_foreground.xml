@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A note sheet with a ticked task line, in the scarlet accent colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M38,30 L62,30 L72,40 L72,78 L38,78 Z"
+        android:strokeColor="#e41951"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M62,30 L62,40 L72,40"
+        android:strokeColor="#e41951"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M45,52 L49,56 L56,47"
+        android:strokeColor="#76ff9f"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M46,66 L64,66"
+        android:strokeColor="#e41951"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
+</vector>

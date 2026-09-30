@@ -1,0 +1,17 @@
+[package]
+name = "scarlet-notes"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+scarlet-core = { workspace = true }
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["backend-android-activity-06"] }
+
+[build-dependencies]
+slint-build = "1.18"
