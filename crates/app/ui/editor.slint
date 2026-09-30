@@ -117,6 +117,13 @@ component NoteLine inherits Rectangle {
             horizontal-stretch: 1;
         }
 
+        // Without a child the layout's max-width would be its padding; the
+        // Flickable takes over the column's max-width, so one blank line
+        // squeezed the whole note into a column as wide as its longest word.
+        if !root.active && root.blank: Rectangle {
+            horizontal-stretch: 1;
+        }
+
         if root.active: TextInput {
             text: root.line.raw;
             color: white;
@@ -201,10 +208,6 @@ export component Editor inherits Rectangle {
         }
 
         flick := Flickable {
-            // An explicit width stops Slint from copying the column's max-width
-            // onto the Flickable: a blank line caps it at the longest word,
-            // which squeezed every line into a narrow column.
-            width: root.width;
             vertical-stretch: 1;
             content-width: self.width;
             content-height: max(self.height, column.preferred-height + 260px);
