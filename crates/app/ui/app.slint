@@ -31,6 +31,7 @@ export global Logic {
     callback line-edited(index: int, text: string);
     callback line-toggled(index: int);
     callback line-merged-up(index: int);
+    callback selection-changed(index: int, anchor: int, cursor: int);
     callback editor-tap-end();
     callback editor-add-task();
     callback editor-done();
@@ -169,6 +170,8 @@ export component AppWindow inherits Window {
     in property <[Line]> lines;
     in property <int> active-line: -1;
     in property <int> cursor-offset;
+    in property <int> anchor-offset;
+    in property <bool> editor-block;
 
     in-out property <DialogKind> dialog: DialogKind.none;
     in-out property <string> dialog-subject;
@@ -384,6 +387,11 @@ export component AppWindow inherits Window {
                 lines: root.lines;
                 active-line: root.active-line;
                 cursor-offset: root.cursor-offset;
+                anchor-offset: root.anchor-offset;
+                block: root.editor-block;
+                selection-changed(index, anchor, cursor) => {
+                    Logic.selection-changed(index, anchor, cursor);
+                }
                 back => {
                     Logic.back();
                 }

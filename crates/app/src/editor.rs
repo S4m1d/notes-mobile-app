@@ -3,6 +3,11 @@
 //! Structural edits (splitting, merging or replacing the active line) always
 //! give the UI a fresh row, and with it a fresh text input. That keeps the
 //! on-screen keyboard's idea of the text in step with ours.
+//!
+//! A selection can only live inside one text input. So while text is selected
+//! the note is a single row holding all of its lines ("block mode"), and the
+//! selection can be dragged over as many lines as needed. Once the selection
+//! is gone the note is split into lines again.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -16,6 +21,9 @@ use slint::{Model, StyledText, Timer, TimerMode, VecModel};
 use crate::{AppWindow, Line, LineKind};
 
 const SAVE_DELAY: Duration = Duration::from_millis(1500);
+/// How long a selection has to be gone before block mode ends. Dragging one
+/// selection handle across the other empties the selection for a moment.
+const COLLAPSE_DELAY: Duration = Duration::from_millis(400);
 
 #[derive(Default)]
 pub struct Editor {
@@ -27,6 +35,11 @@ pub struct Editor {
     trailing_newline: Cell<bool>,
     dirty: Cell<bool>,
     save_timer: Timer,
+    /// Block mode: the only row holds the whole note.
+    block: Cell<bool>,
+    /// Caret byte offset in the active line, as last reported by the UI.
+    cursor: Cell<usize>,
+    collapse_timer: Timer,
 }
 
 fn blank_info() -> LineInfo {
@@ -90,6 +103,7 @@ impl Editor {
         *self.infos.borrow_mut() = infos;
         *self.note.borrow_mut() = Some((root, rel.to_string()));
         self.dirty.set(false);
+        self.leave_block(ui);
 
         // A brand-new note opens ready for typing.
         ui.set_cursor_offset(0);
@@ -101,6 +115,7 @@ impl Editor {
     pub fn close(&self, ui: &AppWindow) -> Result<()> {
         let result = self.save();
         ui.set_active_line(-1);
+        self.leave_block(ui);
         self.model.set_vec(Vec::new());
         self.raws.borrow_mut().clear();
         self.infos.borrow_mut().clear();
@@ -194,6 +209,11 @@ impl Editor {
             return;
         }
         self.touch(save);
+        if self.block.get() {
+            self.set_raw(index, text);
+            self.model.set_row_data(index, row(text, &blank_info()));
+            return;
+        }
         let parts: Vec<&str> = text.split('\n').collect();
         match parts.as_slice() {
             [line] => self.set_raw(index, line),
@@ -245,6 +265,7 @@ impl Editor {
 
     /// A tap below the last line: continue writing at the end of the note.
     pub fn tap_end(&self, ui: &AppWindow) {
+        self.collapse(ui);
         let count = self.len();
         if count > 0 && self.raw(count - 1).trim().is_empty() {
             self.activate(ui, count - 1, self.raw(count - 1).len());
@@ -258,6 +279,7 @@ impl Editor {
     /// Starts a new task line next to the caret (or at the end of the note)
     /// and leaves the caret right after "- [ ] ".
     pub fn add_task(&self, ui: &AppWindow, save: impl FnMut() + 'static) {
+        self.collapse(ui);
         self.touch(save);
         let count = self.len();
         let active = usize::try_from(ui.get_active_line()).ok().filter(|i| *i < count);
@@ -282,8 +304,83 @@ impl Editor {
 
     /// Leaves editing mode: every line is rendered again.
     pub fn done(&self, ui: &AppWindow) -> Result<()> {
+        self.collapse(ui);
         ui.set_active_line(-1);
         self.render();
         self.save()
+    }
+}
+
+/// Block mode.
+impl Editor {
+    fn leave_block(&self, ui: &AppWindow) {
+        self.collapse_timer.stop();
+        self.block.set(false);
+        ui.set_editor_block(false);
+    }
+
+    /// The caret or the selection of the active line moved. `collapse` runs
+    /// once a selection has been gone for a while and should call `collapse`.
+    pub fn selection_changed(&self, ui: &AppWindow, index: usize, anchor: usize, cursor: usize, collapse: impl FnMut() + 'static) {
+        if ui.get_active_line() != index as i32 || index >= self.len() {
+            return;
+        }
+        self.cursor.set(cursor);
+        if anchor != cursor {
+            self.collapse_timer.stop();
+            if !self.block.get() && self.len() > 1 {
+                self.expand(ui, index, anchor, cursor);
+            }
+        } else if self.block.get() {
+            self.collapse_timer.start(TimerMode::SingleShot, COLLAPSE_DELAY, collapse);
+        }
+    }
+
+    /// Enters block mode. The active row and its text input stay (the user
+    /// may still have a finger on it); the other rows fold into it.
+    fn expand(&self, ui: &AppWindow, index: usize, anchor: usize, cursor: usize) {
+        let mut raws = self.raws.borrow_mut();
+        let before: usize = raws[..index].iter().map(|line| line.len() + 1).sum();
+        let text = raws.join("\n");
+        for other in (0..raws.len()).rev().filter(|other| *other != index) {
+            self.model.remove(other);
+        }
+        ui.set_anchor_offset((before + anchor) as i32);
+        ui.set_cursor_offset((before + cursor) as i32);
+        ui.set_active_line(0);
+        self.model.set_row_data(0, row(&text, &blank_info()));
+        *raws = vec![text];
+        *self.infos.borrow_mut() = vec![blank_info()];
+        self.cursor.set(before + cursor);
+        self.block.set(true);
+        ui.set_editor_block(true);
+    }
+
+    /// Leaves block mode: the note is split into lines again and the caret
+    /// stays where it was.
+    pub fn collapse(&self, ui: &AppWindow) {
+        if !self.block.get() {
+            return;
+        }
+        self.leave_block(ui);
+        let text = self.raw(0);
+        let lines: Vec<String> = text.split('\n').map(|l| l.trim_end_matches('\r').to_string()).collect();
+        let (mut active, mut start) = (0, 0);
+        for (index, line) in lines.iter().enumerate() {
+            (active, start) = (index, start);
+            if self.cursor.get() <= start + line.len() {
+                break;
+            }
+            start += line.len() + 1;
+        }
+        let cursor = self.cursor.get().saturating_sub(start).min(lines[active].len()) as i32;
+        let infos = markdown::classify(&lines);
+        let rows: Vec<Line> = lines.iter().zip(&infos).map(|(raw, info)| row(raw, info)).collect();
+        *self.raws.borrow_mut() = lines;
+        *self.infos.borrow_mut() = infos;
+        ui.set_anchor_offset(cursor);
+        ui.set_cursor_offset(cursor);
+        ui.set_active_line(active as i32);
+        self.model.set_vec(rows);
     }
 }

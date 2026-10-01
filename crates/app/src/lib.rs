@@ -304,6 +304,10 @@ fn connect_ui(app: &Rc<App>) {
     on!(on_line_edited, |app, index, text| app.editor.line_edited(&app.ui, index as usize, &text, save_later()));
     on!(on_line_toggled, |app, index| app.editor.line_toggled(index as usize, save_later()));
     on!(on_line_merged_up, |app, index| app.editor.line_merged_up(&app.ui, index as usize, save_later()));
+    on!(on_selection_changed, |app, index, anchor, cursor| {
+        let collapse = || with_app(|app| app.editor.collapse(&app.ui));
+        app.editor.selection_changed(&app.ui, index as usize, anchor as usize, cursor as usize, collapse)
+    });
     on!(on_editor_tap_end, |app| app.editor.tap_end(&app.ui));
     on!(on_editor_add_task, |app| app.editor.add_task(&app.ui, save_later()));
     on!(on_editor_done, |app| {

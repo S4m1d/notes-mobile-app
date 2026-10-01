@@ -31,6 +31,9 @@ Android 17) over adb on 2026-09-30.
 - [x] Lists continue on Enter; Enter on an empty item ends the list
 - [x] Auto-save (after typing pauses, on leaving, on app pause)
 - [x] Caret stays visible above the on-screen keyboard
+- [x] Selection spans lines: while text is selected the whole note is one plain-text block
+      (verified on the phone 2026-10-01; start it with a long-press on the line being edited)
+- [x] Keyboard stays open when its language picker opens (patched Slint backend in `vendor/`)
 - [ ] Italic text is not slanted (the system font has no italic face)
 - [ ] Hardware keyboards type lower-case only (Slint ignores Shift on Android key events)
 
@@ -55,6 +58,7 @@ Android 17) over adb on 2026-09-30.
 - [ ] Bluetooth transport for sync
 - [ ] Rename and move notes and directories
 - [ ] Tap position places the caret inside the line
+- [ ] Long-press on a rendered line starts a selection (today it only makes the line editable)
 - [ ] Search inside note contents
 - [ ] Desktop address discovery (mDNS) instead of typing the IP
 - [ ] Declare Android 17's local-network permission once the target SDK moves to 37

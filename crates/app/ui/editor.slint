@@ -25,11 +25,19 @@ component NoteLine inherits Rectangle {
     in property <Line> line;
     in property <bool> active;
     in property <int> cursor-offset;
+    in property <int> anchor-offset;
+    // The line holds the whole note, see `Editor.block`.
+    in property <bool> block;
+    // Extra space above the text in block mode.
+    in property <length> pad;
     callback activate();
+    callback selection-changed(anchor: int, cursor: int);
     callback edited(text: string);
     callback toggle-task();
     callback merge-up();
     callback cursor-moved(y: length);
+    // This line just became the one being edited, or entered block mode.
+    callback settle(y: length);
 
     property <bool> heading: line.kind == LineKind.heading;
     property <bool> code: line.kind == LineKind.code || line.kind == LineKind.fence;
@@ -45,7 +53,7 @@ component NoteLine inherits Rectangle {
     layout := HorizontalLayout {
         padding-left: 18px + (root.active || root.code ? 0px : root.line.indent * 18px);
         padding-right: 18px;
-        padding-top: !root.active && root.heading ? 12px : 4px;
+        padding-top: (!root.active && root.heading ? 12px : 4px) + root.pad;
         padding-bottom: 4px;
         spacing: 10px;
         min-height: !root.active && root.blank ? 16px : 30px;
@@ -133,9 +141,33 @@ component NoteLine inherits Rectangle {
             horizontal-stretch: 1;
             selection-background-color: Theme.scarlet;
             selection-foreground-color: Theme.bg;
+            // When a selection starts the app moves the whole note into this
+            // line, so that the selection can grow past it.
+            property <bool> block: root.block;
+            property <length> caret-y;
+            // Set while `settle` is about to report the caret instead.
+            property <bool> settling;
             init => {
                 self.focus();
+                self.settling = true;
                 self.set-selection-offsets(root.cursor-offset, root.cursor-offset);
+                self.settling = false;
+                root.settle(self.caret-y);
+            }
+            changed block => {
+                if (self.block) {
+                    self.settling = true;
+                    self.text = root.line.raw;
+                    self.set-selection-offsets(root.anchor-offset, root.cursor-offset);
+                    self.settling = false;
+                    root.settle(self.caret-y);
+                }
+            }
+            changed cursor-position-byte-offset => {
+                root.selection-changed(self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+            }
+            changed anchor-position-byte-offset => {
+                root.selection-changed(self.anchor-position-byte-offset, self.cursor-position-byte-offset);
             }
             edited => {
                 root.edited(self.text);
@@ -148,7 +180,10 @@ component NoteLine inherits Rectangle {
                 reject
             }
             cursor-position-changed(position) => {
-                root.cursor-moved(position.y);
+                self.caret-y = position.y;
+                if (!self.settling) {
+                    root.cursor-moved(position.y);
+                }
             }
         }
     }
@@ -181,6 +216,11 @@ export component Editor inherits Rectangle {
     in property <[Line]> lines;
     in property <int> active-line: -1;
     in property <int> cursor-offset;
+    in property <int> anchor-offset;
+    // Block mode: while text is selected the note is a single line holding
+    // all of its text, so that the selection can span lines.
+    in property <bool> block;
+    callback selection-changed(index: int, anchor: int, cursor: int);
     callback back();
     callback activate(index: int);
     callback edited(index: int, text: string);
@@ -190,11 +230,38 @@ export component Editor inherits Rectangle {
     callback add-task();
     callback done();
 
+    // The caret, in the coordinates of the scrolled content.
+    property <length> caret-y;
+    property <length> block-pad;
+    // The value of `block` the two properties above are up to date with.
+    property <bool> settled-block;
+
+    // Entering and leaving block mode changes the height of the lines above
+    // the caret. This keeps the caret where it was on the screen: the finger
+    // that started the selection is still on it.
+    function settle(row-y: length, y: length) {
+        if (root.block != root.settled-block) {
+            root.settled-block = root.block;
+            if (root.block && root.caret-y > row-y + y) {
+                root.block-pad = root.caret-y - row-y - y;
+            } else {
+                root.block-pad = 0px;
+                flick.content-y = min(0px, flick.content-y + root.caret-y - row-y - y);
+            }
+        }
+        root.caret-moved(row-y, y);
+    }
+
+    function caret-moved(row-y: length, y: length) {
+        root.caret-y = row-y + (root.block ? root.block-pad : 0px) + y;
+        root.reveal(root.caret-y);
+    }
+
     // Scrolls just enough to keep the caret in view.
     function reveal(y: length) {
         if (y - 12px < -flick.content-y) {
             flick.content-y = min(0px, 12px - y);
-        } else if (y + 64px > flick.height - flick.content-y) {
+        } else if (flick.height > 0 && y + 64px > flick.height - flick.content-y) {
             flick.content-y = flick.height - y - 64px;
         }
     }
@@ -229,6 +296,12 @@ export component Editor inherits Rectangle {
                     line: line;
                     active: index == root.active-line;
                     cursor-offset: root.cursor-offset;
+                    anchor-offset: root.anchor-offset;
+                    block: root.block && index == root.active-line;
+                    pad: root.block && index == root.active-line ? root.block-pad : 0px;
+                    selection-changed(anchor, cursor) => {
+                        root.selection-changed(index, anchor, cursor);
+                    }
                     activate => {
                         root.activate(index);
                     }
@@ -241,8 +314,11 @@ export component Editor inherits Rectangle {
                     merge-up => {
                         root.merge-up(index);
                     }
+                    settle(y) => {
+                        root.settle(self.y, y);
+                    }
                     cursor-moved(y) => {
-                        root.reveal(self.y + y);
+                        root.caret-moved(self.y, y);
                     }
                 }
             }
