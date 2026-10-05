@@ -60,6 +60,8 @@ same notes should be available on the phone:
 - Inside a vault the user can:
   - add a directory in any directory;
   - add a note in any directory;
+  - a directory can hold a `template.md` note: new notes created in that
+    directory start with its content (sub-directories are not affected);
   - delete any directory or note, after a confirmation dialog;
   - open a directory by tapping it, and go back up with the back arrow or
     the system back gesture.

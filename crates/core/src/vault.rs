@@ -137,7 +137,12 @@ pub fn create_dir(root: &Path, parent: &str, name: &str) -> Result<String> {
     Ok(rel)
 }
 
-/// Creates an empty note; `.md` is appended to the name when missing.
+/// A note with this name is the template for new notes in its directory.
+pub const TEMPLATE_NAME: &str = "template.md";
+
+/// Creates a note; `.md` is appended to the name when missing. The note starts
+/// with the content of `template.md` from the same directory when there is
+/// one, and empty otherwise.
 pub fn create_note(root: &Path, parent: &str, name: &str) -> Result<String> {
     let name = name.trim();
     let name = if is_note_name(name) { name.to_string() } else { format!("{name}.md") };
@@ -148,7 +153,12 @@ pub fn create_note(root: &Path, parent: &str, name: &str) -> Result<String> {
     if path.exists() {
         return err(format!("'{name}' already exists"));
     }
-    fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    let template = resolve(root, &join_rel(parent, TEMPLATE_NAME))?;
+    let content = match fs::symlink_metadata(&template) {
+        Ok(meta) if meta.is_file() => fs::read(&template)?,
+        _ => Vec::new(),
+    };
+    fs::OpenOptions::new().write(true).create_new(true).open(path)?.write_all(&content)?;
     Ok(rel)
 }
 
@@ -225,6 +235,27 @@ mod tests {
 
         delete(root, "work").unwrap();
         assert_eq!(list(root, "").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn new_note_starts_with_the_directory_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        create_dir(root, "", "journal").unwrap();
+        create_dir(root, "journal", "old").unwrap();
+        write_note(root, "journal/template.md", "# Day\n\n- [ ] plan\n").unwrap();
+
+        create_note(root, "journal", "monday").unwrap();
+        assert_eq!(read_note(root, "journal/monday.md").unwrap(), "# Day\n\n- [ ] plan\n");
+        // The template applies to its own directory only.
+        create_note(root, "journal/old", "sunday").unwrap();
+        assert_eq!(read_note(root, "journal/old/sunday.md").unwrap(), "");
+        create_note(root, "", "inbox").unwrap();
+        assert_eq!(read_note(root, "inbox.md").unwrap(), "");
+        // The template itself is an ordinary note and is never overwritten.
+        assert!(create_note(root, "journal", "template").is_err());
+        assert_eq!(create_note(root, "", "template").unwrap(), "template.md");
+        assert_eq!(read_note(root, "template.md").unwrap(), "");
     }
 
     #[test]

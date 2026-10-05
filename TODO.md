@@ -18,6 +18,7 @@ Android 17) over adb on 2026-09-30.
 - [x] Vault list: create (verified on the phone)
 - [~] Vault list: delete with confirmation (same dialog as entries; not tapped through)
 - [x] Directory browser: open, back, create directory, create note, delete with confirmation
+- [x] New notes start with the content of `template.md` from the same directory (verified on the phone 2026-10-05)
 - [x] System back gesture navigates up
 - [x] Search note and directory names in the whole vault (verified on the phone)
 
